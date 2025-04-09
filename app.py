@@ -2,126 +2,101 @@ import streamlit as st
 import json
 import os
 
-ARQUIVO_VALORES = "valores.json"
-ARQUIVO_CATEGORIAS = "categorias.json"
-USUARIOS = {"ADRIANO": "123"}
+# Funções auxiliares
+def carregar_dados(arquivo, vazio=None):
+    if not os.path.exists(arquivo) or os.stat(arquivo).st_size == 0:
+        with open(arquivo, 'w') as f:
+            json.dump(vazio or {}, f)
+        return vazio or {}
+    with open(arquivo, 'r') as f:
+        return json.load(f)
 
-# Categorias padrão
-CATEGORIAS_PADRAO = [
-    ("FREIO", 6), ("TRANSMISSAO", 7), ("ALINHAMENTO/BALANCEAMENTO", 9),
-    ("MOTOR", 10), ("SUSPENSAO", 11), ("LIMPEZA VALV INJETORAS", 12),
-    ("RETIFICA DISCO/TAMBOR", 13), ("DIRECAO", 14), ("SERVICO TERCEIRIZADO", 15),
-    ("OUTROS - GERAL", 17), ("CAMBAGEM/CASTER/EIXO TRAS", 18), ("OUTROS - ESPECIFICO", 19),
-    ("GNV", 21), ("TOWNER", 23), ("PERFORMANCE", 24), ("AR CONDICIONADO", 25),
-    ("VENDA DIRETA - GNV", 26), ("TORNO", 27)
-]
-
-# Funções utilitárias
-def carregar_json(arquivo):
-    if os.path.exists(arquivo):
-        with open(arquivo, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {}
-
-def salvar_json(arquivo, dados):
-    with open(arquivo, "w", encoding="utf-8") as f:
+def salvar_dados(arquivo, dados):
+    with open(arquivo, 'w') as f:
         json.dump(dados, f, indent=4)
 
-# Função principal da tela de valores
-def tela_principal():
-    st.title("Atualização de Valores por Categoria de Serviço")
+# Caminhos dos arquivos
+ARQUIVO_CATEGORIAS = 'categorias.json'
+ARQUIVO_VALORES = 'valores.json'
 
-    valores_salvos = carregar_json(ARQUIVO_VALORES)
-    categorias_extra = carregar_json(ARQUIVO_CATEGORIAS)
+# Inicialização dos dados
+categorias = carregar_dados(ARQUIVO_CATEGORIAS, [])
+valores = carregar_dados(ARQUIVO_VALORES, {})
 
-    categorias = CATEGORIAS_PADRAO + [(nome, int(codigo)) for codigo, nome in categorias_extra.items()]
-    categorias.sort(key=lambda x: x[1])
+# Título
+st.title("Gerenciador de Valores por Categoria de Serviço")
 
-    valores_atualizados = {}
+# Menu lateral
+tela = st.sidebar.radio("Navegar para:", ["Adicionar Categoria", "Gerenciar Valores"])
 
-    st.subheader("Editar Valores de Venda")
-
-    for nome, codigo in categorias:
-        valor = valores_salvos.get(str(codigo), "")
-        novo_valor = st.text_input(
-            f"{nome} (CÓDIGO {codigo})",
-            value=valor,
-            key=f"val_{codigo}"
-        )
-        valores_atualizados[str(codigo)] = novo_valor
-
-    # Salvar automaticamente
-    salvar_json(ARQUIVO_VALORES, valores_atualizados)
-    st.success("Alterações salvas automaticamente.")
-
-    st.divider()
-
-    st.subheader("Gerar Script SQL")
-    if st.button("Gerar SQL"):
-        comandos_sql = []
-        for codigo, valor in valores_atualizados.items():
-            if valor.strip():
-                try:
-                    valor_float = float(valor)
-                    comandos_sql.append(
-                        f"UPDATE OFI_SERVICO SET VAL_SERVICO_UNITARIO = {valor_float} WHERE CATEGORIA_SERVICO = {codigo};"
-                    )
-                except ValueError:
-                    st.error(f"Valor inválido para código {codigo}: {valor}")
-                    return
-        if comandos_sql:
-            st.code("\n".join(comandos_sql), language="sql")
+# Função: Adicionar Categoria
+def adicionar_categoria():
+    st.header("Adicionar Nova Categoria")
+    nova_categoria = st.text_input("Nome da nova categoria:")
+    if st.button("Adicionar"):
+        if nova_categoria and nova_categoria not in categorias:
+            categorias.append(nova_categoria)
+            salvar_dados(ARQUIVO_CATEGORIAS, categorias)
+            st.success(f"Categoria '{nova_categoria}' adicionada!")
+            st.experimental_rerun()
         else:
-            st.warning("Nenhum valor preenchido.")
+            st.warning("Categoria já existe ou está em branco.")
 
-    st.divider()
+    st.subheader("Categorias Existentes")
+    for categoria in categorias:
+        col1, col2 = st.columns([4, 1])
+        col1.write(f"🔹 {categoria}")
+        if col2.button("Excluir", key=f"del_{categoria}"):
+            categorias.remove(categoria)
+            # Remover valores associados à categoria
+            valores.pop(categoria, None)
+            salvar_dados(ARQUIVO_CATEGORIAS, categorias)
+            salvar_dados(ARQUIVO_VALORES, valores)
+            st.success(f"Categoria '{categoria}' excluída com sucesso.")
+            st.experimental_rerun()
 
-    st.subheader("Gerenciar Categorias Adicionais")
-    with st.form("nova_categoria"):
-        nome_novo = st.text_input("Nome da nova categoria")
-        codigo_novo = st.number_input("Código da nova categoria", step=1, format="%d")
-        enviar = st.form_submit_button("Adicionar")
-        if enviar:
-            if str(int(codigo_novo)) in categorias_extra:
-                st.error("Código já existente!")
+# Função: Gerenciar Valores
+def gerenciar_valores():
+    st.header("Gerenciar Valores por Categoria")
+
+    if not categorias:
+        st.warning("Nenhuma categoria cadastrada ainda.")
+        return
+
+    for categoria in categorias:
+        st.subheader(f"Categoria: {categoria}")
+        itens = valores.get(categoria, [])
+
+        novos_itens = []
+        for idx, item in enumerate(itens):
+            col1, col2, col3 = st.columns([3, 2, 1])
+            nome = col1.text_input("Nome", value=item['nome'], key=f"{categoria}_nome_{idx}")
+            valor = col2.text_input("Valor", value=item['valor'], key=f"{categoria}_valor_{idx}")
+            remover = col3.checkbox("Remover", key=f"{categoria}_remove_{idx}")
+            if not remover:
+                novos_itens.append({'nome': nome, 'valor': valor})
+
+        # Adicionar novo item
+        st.markdown("---")
+        col1, col2 = st.columns(2)
+        novo_nome = col1.text_input(f"Novo item - Nome ({categoria})", key=f"{categoria}_novo_nome")
+        novo_valor = col2.text_input(f"Novo item - Valor ({categoria})", key=f"{categoria}_novo_valor")
+        if st.button(f"Adicionar Item em {categoria}", key=f"add_item_{categoria}"):
+            if novo_nome and novo_valor:
+                novos_itens.append({'nome': novo_nome, 'valor': novo_valor})
+                st.success(f"Item '{novo_nome}' adicionado!")
             else:
-                categorias_extra[str(int(codigo_novo))] = nome_novo
-                salvar_json(ARQUIVO_CATEGORIAS, categorias_extra)
-                st.success("Categoria adicionada! Recarregue a página para visualizar.")
+                st.warning("Preencha nome e valor para adicionar.")
 
-    st.divider()
-    
-    if st.button("Excluir Categoria Adicional"):
-        codigos_adicionais = list(categorias_extra.keys())
-        if not codigos_adicionais:
-            st.info("Nenhuma categoria adicional cadastrada.")
-        else:
-            codigo_excluir = st.selectbox("Selecione a categoria para excluir", codigos_adicionais)
-            if st.button("Confirmar Exclusão"):
-                nome_excluido = categorias_extra.pop(codigo_excluir)
-                valores_salvos.pop(codigo_excluir, None)
-                salvar_json(ARQUIVO_CATEGORIAS, categorias_extra)
-                salvar_json(ARQUIVO_VALORES, valores_salvos)
-                st.success(f"Categoria '{nome_excluido}' excluída!")
+        # Atualiza os valores
+        valores[categoria] = novos_itens
 
-# Login
-def tela_login():
-    st.title("Login")
+    if st.button("Salvar Todas as Alterações"):
+        salvar_dados(ARQUIVO_VALORES, valores)
+        st.success("Valores salvos com sucesso!")
 
-    usuario = st.text_input("Usuário")
-    senha = st.text_input("Senha", type="password")
-    if st.button("Entrar"):
-        if usuario in USUARIOS and USUARIOS[usuario] == senha:
-            st.session_state["autenticado"] = True
-            st.rerun()
-        else:
-            st.error("Usuário ou senha inválidos.")
-
-# Controle de acesso
-if "autenticado" not in st.session_state:
-    st.session_state["autenticado"] = False
-
-if st.session_state["autenticado"]:
-    tela_principal()
+# Executa a tela correspondente
+if tela == "Adicionar Categoria":
+    adicionar_categoria()
 else:
-    tela_login()
+    gerenciar_valores()
